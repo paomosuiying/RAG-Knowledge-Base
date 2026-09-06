@@ -1,0 +1,13 @@
+[project]
+name = "knowledge"
+version = "0.1.0"
+description = "知识库 RAG 系统：文档导入（LangGraph 流程）与多路召回查询服务"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+# 依赖请在代码逐步落地后通过 `uv add <pkg>` 追加（参考 readme.md），例如：
+#   pymilvus[model]  transformers  FlagEmbedding  modelscope
+#   mineru[all]      torch          ...
