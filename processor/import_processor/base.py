@@ -8,10 +8,9 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Optional
 import logging
 
-from knowledge.processor.import_process.config import ImportConfig, get_config
-from knowledge.processor.import_process.exceptions import ImportProcessError
-from knowledge.utils.task_util import add_running_task, add_done_task
-
+from processor.import_processor.config import ImportConfig
+from processor.import_processor.exceptions import ImportProcessError
+from processor.import_processor.config import get_config
 T = TypeVar("T")  # 泛型状态类型
 
 
