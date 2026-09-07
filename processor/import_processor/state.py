@@ -1,8 +1,5 @@
 """
-
 导入流程状态类型定义
-
-
 
 定义完整的状态结构和辅助函数
 
@@ -12,18 +9,12 @@ from typing import TypedDict, List
 
 import copy
 
-
 class ImportGraphState(TypedDict, total=False):
 
 
     """
-
     导入流程图状态
-
-
-
     包含整个导入流程中传递的所有数据
-
     """
 
     # ==================== 任务标识 ====================
