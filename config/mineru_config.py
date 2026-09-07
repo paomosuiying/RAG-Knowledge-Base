@@ -10,6 +10,6 @@ class MineruConfig:
     api_token: str
 
 mineru_config = MineruConfig(
-    base_url=os.getenv("MINERU_BASE_URL"),
-    api_token=os.getenv("MINERU_API_TOKEN")
-    )
+    base_url = os.getenv("MINERU_BASE_URL"),
+    api_token = os.getenv("MINERU_API_TOKEN")
+)
