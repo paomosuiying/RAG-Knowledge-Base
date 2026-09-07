@@ -11,7 +11,7 @@ python -m venv kb311
     pytorch
 """
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip uninstall torch torchvision torchaudio -y
+pip uninstall torch torchvision torchaudio -y   #卸载旧版本驱动
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 (5090)

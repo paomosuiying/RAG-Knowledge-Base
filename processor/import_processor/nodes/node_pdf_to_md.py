@@ -85,7 +85,7 @@ class NodePDFToMD(BaseNode):
         api_token = mineru_config.api_token
         base_url = mineru_config.base_url
 
-        # 2. 从MinerU服务器获取上传链接(post)
+        # 2. 从MinerU服务器获取上传链接(post)  关键：response = requests.post(url, headers=header, json=data)
         header = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_token}"
@@ -114,7 +114,7 @@ class NodePDFToMD(BaseNode):
         signed_url = result["data"]["file_urls"][0]
         batch_id = result["data"]["batch_id"]
 
-        # 2. 文件上传
+        # 3. 文件上传：关键：res_upload = requests.put(signed_url, data=f)
         with open(pdf_path_obj, "rb") as f:
             res_upload = requests.put(signed_url, data=f)
             if res_upload.status_code != 200:
@@ -122,7 +122,7 @@ class NodePDFToMD(BaseNode):
 
             self.logger.info(f"文件上传成功！")
 
-        # 3. 批量获取任务结果
+        # 4. 批量获取任务结果
         poll_url = f"{mineru_config.base_url}/extract-results/batch/{batch_id}"
 
         start_time = time.time()  # 记录开始时间
@@ -130,7 +130,7 @@ class NodePDFToMD(BaseNode):
         poll_interval = 3  # 轮询间隔时间
         self.logger.info(f"【任务轮询】最大超时：{timeout_seconds}s，batch_id：{batch_id}")
 
-        # 4. 根据batch_id轮询任务状态直到成功"done"
+        # 5. 根据batch_id轮询任务状态直到成功"done"
         while True:
             #有效代码：获取下载链接
             #res_poll = requests.get(url=poll_url, headers=header, timeout=10)

@@ -1,21 +1,33 @@
-# test/04_path.py
+# test/GPU验证.py
 
-from pathlib import Path
+import torch
 
-# 创建 Path 对象
-path = Path(r"F:\Pycharm_Agent\KnowLedge\doc\hak180产品安全手册.pdf")
+print('=== GPU 信息检测 ===')
+print(f'GPU 可用：{torch.cuda.is_available()}')
 
-# 常用属性
-print(path.name)    # "万用表的使用.pdf" - 完整文件名
-print(path.stem)       # "万用表的使用" - 不含扩展名的文件名
-print(path.suffix)     # ".pdf" - 扩展名
-print(path.parent)     # Path("D:/doc") - 父目录
+if torch.cuda.is_available():
+    # 获取显卡数量
+    gpu_count = torch.cuda.device_count()
+    print(f'显卡数量：{gpu_count}')
 
-# 常用方法
-print(path.exists())  # True/False - 文件是否存在
-print(path.is_file())  # True/False - 是否为文件
-print(path.is_dir())   # True/False - 是否为目录
+    # 遍历每块显卡的详细信息
+    for i in range(gpu_count):
+        print(f'\n--- 显卡 {i} ---')
+        print(f'名称：{torch.cuda.get_device_name(i)}')
+        print(f'计算能力：{torch.cuda.get_device_capability(i)}')
 
-# 路径拼接（使用 / 运算符）
-output_path = path.parent / "output" / "result.md"
-print(output_path)
+        # 获取显存信息（单位：GB）
+        total_memory = torch.cuda.get_device_properties(i).total_memory / (1024**3)
+        print(f'总显存：{total_memory:.2f} GB')
+
+        # 当前显存使用情况
+        allocated = torch.cuda.memory_allocated(i) / (1024**3)
+        reserved = torch.cuda.memory_reserved(i) / (1024**3)
+        print(f'已分配显存：{allocated:.2f} GB')
+        print(f'已预留显存：{reserved:.2f} GB')
+
+        # CUDA 版本
+        print(f'CUDA 版本：{torch.version.cuda}')
+        print(f'cuDNN 版本：{torch.backends.cudnn.version()}')
+else:
+    print('未检测到可用的 GPU，将使用 CPU')
