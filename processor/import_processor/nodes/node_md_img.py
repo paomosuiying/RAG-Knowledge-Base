@@ -8,8 +8,7 @@ from collections import deque
 from pathlib import Path
 from sys import prefix
 from typing import Tuple, List, Dict, Deque
-
-import minio
+from aiohttp.web_fileresponse import content_type
 from langchain_openai import ChatOpenAI
 from minio import Minio
 from minio.deleteobjects import DeleteObject
@@ -35,7 +34,7 @@ class NodeMDImg(BaseNode):
 
         #1.参数处理
         md_content ,md_path_obj,images_dir = self._step_1_get_content(state)
-
+        #print(f"md_content :{md_content},md_path_obj :{md_path_obj},images_dir :{images_dir}")
         #2.图片扫描
         target_images = self._step_2_scan_images(md_content,images_dir)
 
@@ -75,6 +74,11 @@ class NodeMDImg(BaseNode):
 
         # 4、获取md_content
         md_content = state["md_content"]
+
+        #测试用代码
+        if not md_content:
+            with open(md_path, "r", encoding="utf-8") as md_file:
+                md_content = md_file.read()
 
         # 5、组装图片文件夹路径：图片文件夹固定为MD文件同级的images目录
         images_dir = md_path_obj.parent / "images"
@@ -248,36 +252,45 @@ class NodeMDImg(BaseNode):
             return "图片描述"
 
     #步骤4：将图片上传到目标文件夹，并替换Markdown文档中的图片链接
-    def _step_4_upload_and_replace(self, doc_stem :str, target_images : List[Tuple[str,str,Tuple[str,str]]], summaries : Dict[str ,str], md_content :str )->str:
+    def _step_4_upload_and_replace(self, doc_stem: str, target_images: List[Tuple[str, str, Tuple[str, str]]],
+                                   summaries: Dict[str, str], md_content: str) -> str:
         """
-        步骤4：将图片上传到目标文件夹，并替换Markdown文档中的图片链接
-        :param doc_stem: 文档文件名（不含后缀），作为大模型prompt上下文
+        步骤 4: 上传图片并合并信息，然后替换 Markdown 中的内容。
+        流程：
+        1. 确定 MinIO 上的上传目录（按文档名隔离）。
+        2. 清理该目录下的旧数据。
+        3. 批量上传图片。
+        4. 合并“图片摘要”和“图片URL”。
+        5. 替换 Markdown 文本中的图片引用。
+        :param doc_stem: 文档文件名（不含后缀），作为MinIO上传子目录名（按文档隔离）
         :param target_images: 待处理图片列表，元素为(图片文件名, 图片完整路径, 图片上下文)
-        :param summaries: 图片摘要字典，键：图片文件名，值：图片内容摘要
-        :param md_content: Markdown文档内容
-        :return: 替换后的Markdown文档内容
+        :param summaries: 图片摘要字典，键：图片文件名，值：内容摘要
+        :param md_content: 原始MD文件内容
+        :return: 图片引用替换后的新MD内容
         """
-        #0. minio客户端
+
+        # 获取MinIO客户端
         minio_client = get_minio_client()
+
         # 构造上传目录，去除文件名中的空格
         minio_img_dir = minio_config.img_dir
         upload_dir = f"{minio_img_dir}/{doc_stem}".replace(" ", "")
 
-        #1.清理minio目录
+        # 步骤1：清理该文档对应的MinIO旧目录
         self._clean_minio_directory(minio_client, upload_dir)
 
-        #2.批量上传图片，获取minio的urls
+        # 步骤2：批量上传图片至MinIO，获取URL映射
         urls = self._upload_images_batch(minio_client, upload_dir, target_images)
 
-        #3.将摘要和url路径合并
-        image_info = self.merge_summary_and_url(summaries,urls)
+        # 步骤3：合并图片摘要和URL，过滤上传失败的图片
+        image_info = self._merge_summary_and_url(summaries, urls)
 
-        #4.替换md中的摘要和路径
-        md_content = self._process_summart_and_url(md_content, image_info)
+        # 步骤4：替换MD内容中的本地图片引用为MinIO远程引用
+        md_content = self._process_md_file(md_content, image_info)
 
-    # 步骤4方法1：清理minio目录
-    def _clean_minio_directory(self, minio_client :Minio, upload_dir)-> None:
+        return md_content
 
+    def _clean_minio_directory(self, minio_client: Minio, prefix: str) -> None:
         """
         幂等性清理：上传前先删除 MinIO 中指定目录下的旧文件。
         防止重名文件导致的内容混淆或垃圾堆积。
@@ -295,18 +308,103 @@ class NodeMDImg(BaseNode):
         except Exception as e:
             self.logger.error(f"清理minio目录失败：{e}")
 
-    # 步骤4方法2：批量上传图片，获取minio的urls
-    def _upload_images_batch(self, minio_client : minio , upload_dir :str, target_images :list[Tuple[str,str,Tuple[str,str]]]):
+    def _upload_images_batch(self, minio_client: Minio, upload_dir: str, target_images: List[Tuple]) -> Dict[str, str]:
+        """
+        批量上传待处理图片至MinIO，返回图片文件名与访问URL的映射关系
+        :param minio_client: 初始化完成的MinIO客户端对象
+        :param upload_dir: MinIO上传根目录
+        :param target_images: 待处理图片列表，元素为(图片文件名, 图片完整路径, 图片上下文)
+        :return: 图片URL字典，键：图片文件名，值：MinIO访问URL
+        """
         urls = {}
+        for img_file, img_path, _ in target_images:
+            object_name = f"{upload_dir}/{img_file}"
+            urls[img_file] = self._upload_to_minio(minio_client, img_path, object_name)
+        return urls
+
+    def _upload_to_minio(self, minio_client: Minio, local_path: str, object_name: str) -> str | None:
+        """
+        将单张本地图片上传至MinIO对象存储，并返回公网可访问URL
+        :param minio_client: 初始化完成的MinIO客户端对象
+        :param local_path: 图片本地完整路径
+        :param object_name: MinIO中要存储的对象名称
+        :return: 图片MinIO访问URL（上传失败返回None）
+        """
+        try:
+            # 上传本地文件至MinIO（fput_object：文件流上传，适合大文件）
+            minio_client.fput_object(
+                bucket_name=minio_config.bucket_name,  # MinIO存储桶名（从配置读取）
+                object_name=object_name,  # MinIO对象名称
+                file_path=local_path,  # 本地文件路径
+                # 关键规则：多后缀文件仅拆分最后一个，如test.tar.gz拆分为("test.tar", ".gz")。
+                content_type=f"image/{os.path.splitext(local_path)[1][1:]}"
+            )
+
+            # 构造MinIO基础访问URL
+            base_url = f"http://{minio_config.endpoint}/{minio_config.bucket_name}"
+
+            return f"{base_url}/{object_name}"
+
+        except Exception as e:
+            self.logger.error(f"图片上传MinIO失败：{local_path}，错误信息：{str(e)}")
+
+    def _merge_summary_and_url(self, summaries: Dict[str, str], urls: Dict[str, str]) -> Dict[str, Tuple[str, str]]:
+        """
+        合并图片摘要字典和URL字典，过滤掉上传失败无URL的图片
+        :param summaries: 图片摘要字典，键：图片文件名，值：内容摘要
+        :param urls: 图片URL字典，键：图片文件名，值：MinIO访问URL
+        :return: 合并后的图片信息字典，键：图片文件名，值：(摘要, URL)元组
+        """
+        image_info = {}
+        for image_file, summary in summaries.items():
+            if url := urls.get(image_file):
+                image_info[image_file] = (summary, url)
+        return image_info
+
+    def _process_md_file(self, md_content: str, image_info: Dict[str, Tuple[str, str]]) -> str:
+        """
+        核心功能：替换MD内容中的本地图片引用为MinIO远程引用
+        替换规则：![原描述](本地路径) → ![图片摘要](MinIO访问URL)
+        :param md_content: 原始MD文件内容
+        :param image_info: 合并后的图片信息字典，键：图片文件名，值：(摘要, URL)
+        :return: 替换后的新MD内容
+        """
+
+        # 遍历 image_info 字典的每一项：key=图片文件名，value=(摘要, 新URL)
+        for image_file, (summary, new_url) in image_info.items():
+            # 正则匹配MD图片标签，忽略大小写
+            # 正则规则：![任意描述](任意路径+图片文件名+任意后缀)
+            # re.escape: 转义图片文件名中的特殊字符，避免正则语法错误
+            pattern = re.compile(r"!\[.*?\]\(.*?" + re.escape(image_file) + r".*?\)")
+
+            # 替换匹配内容：使用新摘要作为图片描述，新URL作为图片路径
+            # pattern.sub(替换规则, 待替换文本)
+            # md_content = ..., 替换后原地更新
+            md_content = pattern.sub(lambda m: f"![{summary}]({new_url})", md_content)
+
+        self.logger.info(f"MD文件图片引用替换完成，共替换{len(image_info)}处图片引用")
+
+        return md_content
 
 
-    # 步骤4方法3：将摘要和url路径合并
-    def merge_summary_and_url(self, summaries, urls):
-        pass
+    def _step_5_backup_new_md_file(self, origin_md_path: str, md_content: str) -> str:
+        """
+        步骤5：将处理后的MD内容保存为新文件（原文件不变，避免数据丢失）
+        新文件命名规则：原文件名 + _new.md（如test.md → test_new.md）
+        :param origin_md_path: 原始MD文件完整路径
+        :param md_content: 处理后的新MD内容
+        :return: 新MD文件的完整路径
+        """
+        # 构造新文件路径：替换原后缀为 _new.md
+        new_md_file_name = os.path.splitext(origin_md_path)[0] + "_new.md"
 
-    # 步骤4方法4：替换md中的摘要和路径
-    def _process_summart_and_url(self, md_content, image_info):
-        pass
+        # 写入新MD内容（覆盖写入，若文件已存在则更新）
+        with open(new_md_file_name, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        self.logger.info(f"处理后MD文件已保存，新文件路径：{new_md_file_name}")
+
+        return new_md_file_name
 
 
 if __name__ == '__main__':
@@ -322,5 +420,5 @@ if __name__ == '__main__':
 
     #打印结果
     dump = json.dumps(result)
-    print(dump)
+    # print(dump)
 
