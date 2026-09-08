@@ -237,7 +237,7 @@ if __name__ == '__main__':
 
     init_state = {
         "pdf_path" : "F:\Pycharm_Agent\KnowLedge\doc\hak180产品安全手册.pdf",
-        "file_dir" : "F:\Pycharm_Agent\KnowLedge\doc\hak180产品安全手册"
+        "file_dir" : "F:\output"
     }
 
     node = NodePDFToMD()
