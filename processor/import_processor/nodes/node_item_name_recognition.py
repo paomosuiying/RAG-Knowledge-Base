@@ -1,10 +1,9 @@
 import json
 from os import system
+from pathlib import Path
 from typing import List, Dict, Tuple
-
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
-
 from pymilvus import DataType
 from config.lm_config import lm_config
 from config.milvus_config import milvus_config
@@ -36,7 +35,15 @@ class NodeItemNameRecognition(BaseNode):
 
         # 4.回填数据（item_name -> chunks)
         self._step_4_update_chunks(state, chunks, item_name)
-
+        # #备份数据
+        # backup_path = "F:\output\hak180产品安全手册\hak180产品安全手册_chunks.json"
+        # with open(backup_path, "w", encoding="utf-8") as f:
+        #     json.dump(
+        #         chunks,
+        #         f,
+        #         ensure_ascii=False,
+        #         indent=2
+        #     )
         # 5.主体名称向量化
         dense_vector, sparse_vector = self._step_5_generate_embedding(item_name)
 
@@ -279,6 +286,7 @@ class NodeItemNameRecognition(BaseNode):
             schema=schema,
             index_params=index_params
         )
+
 
 if __name__ == '__main__':
     node = NodeItemNameRecognition()

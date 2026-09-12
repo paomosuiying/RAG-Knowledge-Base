@@ -348,6 +348,7 @@ class NodeDocumentSplit(BaseNode):
         :param state: 项目状态字典，需包含md_dir（备份目录）
         :param sections: 最终处理后的Chunk列表
         """
+        print("node_backup : 步骤6：Chunk结果本地JSON备份")
         try:
             # 拼接备份文件路径：固定文件名，便于查找
             backup_path = Path(state.get("md_path")).parent/ f'{state.get("file_title")}_chunks.json'
@@ -374,12 +375,12 @@ class NodeDocumentSplit(BaseNode):
 if __name__ == '__main__':
     node = NodeDocumentSplit()
 
-    with open(r"F:\output\hak180产品安全手册\hak180产品安全手册.md",encoding="utf-8") as f:
+    with open(r"F:\output\hak180产品安全手册\hak180产品安全手册_new.md",encoding="utf-8") as f:
         md_content = f.read()
         init_state = {
-             "md_path" : "F:\output\hak180产品安全手册\hak180产品安全手册.md",
+             "md_path" : "F:\output\hak180产品安全手册\hak180产品安全手册_new.md",
              "md_content" : md_content,
-             "file_title" : "hak180产品安全手册"
+             "file_title" : "hak180产品安全手册_new"
         }
 
     process = node.process(init_state)
