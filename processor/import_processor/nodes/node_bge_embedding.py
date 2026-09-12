@@ -1,4 +1,3 @@
-
 from processor.import_processor.base import BaseNode
 from processor.import_processor.state import ImportGraphState
 
@@ -11,6 +10,4 @@ class NodeBGEEmbedding(BaseNode):
     name = "node_bge_embedding"
 
     def process(self, state: ImportGraphState):
-
-
-        return state
+      pass

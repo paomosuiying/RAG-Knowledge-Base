@@ -7,7 +7,7 @@ from typing import Tuple, List, Dict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from processor.import_processor.base import BaseNode, setup_logging
-from processor.import_processor.config import get_config
+from processor.import_processor.import_config import get_config
 from processor.import_processor.exceptions import StateFieldError
 from processor.import_processor.state import ImportGraphState
 import json
