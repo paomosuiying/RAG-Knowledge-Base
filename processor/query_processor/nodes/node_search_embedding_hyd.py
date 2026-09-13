@@ -3,13 +3,14 @@ from processor.query_processor.state import QueryGraphState
 from tool.logger import logger
 
 
-class NodeWebSearchMcp(NodeBase):
+class NodeSearchEmbeddingHyde(NodeBase):
     """
-    节点功能，调用外部搜索引擎补充信息
+    节点功能：HyDE (Hypothetical Document Embedding)
+    先让 LLM 生成假设性答案，再对答案进行向量检索，提高召回率。
     """
 
     # 覆盖基类的 name 属性，标识节点名称
-    name: str = "node_web_search_mcp"
+    name: str = "node_search_embedding_hyde"
 
     def process(self, state: QueryGraphState) -> QueryGraphState:
         """
@@ -22,4 +23,4 @@ class NodeWebSearchMcp(NodeBase):
         logger.info(f"【{self.name}】节点逻辑")
 
         # return state
-        return {"web_search_docs": []}
+        return {"hyde_embedding_chunks": []}

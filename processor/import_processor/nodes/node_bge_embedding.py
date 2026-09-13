@@ -21,6 +21,15 @@ class NodeBGEEmbedding(BaseNode):
         #2.数据向量化
         output_data = self._step_2_bge_embedding(chunks)
         print(output_data)
+        #备份数据
+        backup_path = "F:\output\hak180产品安全手册\hak180产品安全手册_new_new_chunks.json"
+        with open(backup_path, "w", encoding="utf-8") as f:
+            json.dump(
+                output_data,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
         #3.返回结果
         state["chunks"] = output_data
         return state
@@ -39,7 +48,7 @@ class NodeBGEEmbedding(BaseNode):
         """
         将item_name和content转化为向量数据（稀疏和稠密）
         """
-        print("node_bge_embedding: 数据向量化")
+        print("node_bge_embedding: 向量化")
         output_data = []
         batch_size= 5 #批量处理
         for i in range(0,len(chunks),batch_size):
@@ -60,7 +69,8 @@ class NodeBGEEmbedding(BaseNode):
                 item["sparse_vector"] = sparse
                 output_data.append(item)
 
-        print(output_data)
+        return output_data
+
 
 
 if __name__ == '__main__':
