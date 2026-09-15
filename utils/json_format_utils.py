@@ -13,3 +13,13 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 def format_json(data: Any, indent: int = 4, ensure_ascii: bool = False) -> str:
     return json.dumps(data, indent=indent, ensure_ascii=ensure_ascii, cls=CustomJSONEncoder)
+
+
+def serialize_json(obj, indent=None):
+    def _inner(o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        raise TypeError(f"无法序列化类型: {type(o)}")
+    return json.dumps(obj, default=_inner, ensure_ascii=False, indent=indent)

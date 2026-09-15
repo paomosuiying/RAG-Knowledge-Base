@@ -216,8 +216,8 @@ class NodeItemNameConfirm(NodeBase):
         # 返回最终对齐结果：确认列表和候选列表均做去重处理（list(set())）
         print(confirmed_item_names,options)
         return {
-            "confirmed_item_names":[],#确认后的商品名称(>0.8)
-            "options":[],#可能低分的商品民名称（<0.6)
+            "confirmed_item_names":confirmed_item_names,#确认后的商品名称(>0.8)
+            "options":options,#可能低分的商品民名称（<0.6)
         }
 
     def _step_7_chunk_confirmation(self, state, align_result :Dict, history, message_id):

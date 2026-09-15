@@ -1,6 +1,11 @@
+from config.milvus_config import milvus_config
 from processor.query_processor.base import NodeBase
+from processor.query_processor.prompt.search_embedding_hyde import HYDE_PROMPT
 from processor.query_processor.state import QueryGraphState
 from tool.logger import logger
+from utils.embedding_utils import generate_embeddings
+from utils.llm_utils import get_llm_client
+from utils.milvus_utils import get_milvus_client, hybrid_search, create_hybrid_search_requests
 
 
 class NodeSearchEmbeddingHyde(NodeBase):
@@ -22,5 +27,99 @@ class NodeSearchEmbeddingHyde(NodeBase):
         # TODO
         logger.info(f"【{self.name}】节点逻辑")
 
-        # return state
-        return {"hyde_embedding_chunks": []}
+        # 1、用户问题和已确认商品名
+        rewritten_query = state.get("rewritten_query")
+        item_names = state.get("item_names")
+
+        try:
+
+            # 2、生成假设性文档
+            hyde_doc = self._step_1_create_hyde_doc(rewritten_query)
+
+            # 3、用“重写问题 + 假设文档”检索切片
+            res = self._step_2_search_embedding_hyde(
+                rewritten_query=rewritten_query,
+                hyde_doc=hyde_doc,
+                item_names=item_names
+            )
+            print(res)
+            # 4、结果封装
+            return {
+                "hyde_embedding_chunks": res,
+                "hyde_doc": hyde_doc,
+            }
+
+        except Exception as e:
+            logger.exception(f"假设性文档向量搜索失败: {e}")
+            return {}
+
+    def _step_1_create_hyde_doc(self, rewritten_query : str)->str:
+        logger.info("步骤1: 开始生成假设性文档")
+
+        try:
+            llm = get_llm_client()
+            hyde_prompt = HYDE_PROMPT.format(rewritten_query=rewritten_query)
+            hyde_doc = llm.invoke(hyde_prompt).content
+            print("假设性文档：".format(hyde_doc))
+            return hyde_doc
+
+        except Exception as e:
+            logger.exception(f"步骤1: 生成假设文档失败: {e}")
+            raise e
+
+    def _step_2_search_embedding_hyde(self,rewritten_query: str,hyde_doc: str,item_names=None):
+        """
+        阶段2：利用“重写问题 + 假设性文档”生成 embedding，并到向量库检索切片。
+        """
+        try:
+            # 1、拼接查询与假设文档，形成更丰富的语义上下文
+            # 这里把用户问题 + 假设答案拼在一起生成向量，相当于：
+            # 既保留了用户的原始意图（rewritten_query）
+            # 又增强了语义丰富度（hyde_doc）
+            combined_text = rewritten_query + " " + hyde_doc
+
+            # 2、生成向量 (Dense + Sparse)
+            embeddings = generate_embeddings([combined_text])
+            dense_vec = embeddings.get("dense")[0]
+            sparse_vec = embeddings.get("sparse")[0]
+
+            # 3. 获取Milvus的集合
+            collection_name = milvus_config.chunks_collection
+
+            # 4、处理 item_names 中的引号，防止注入或语法错误
+            expr = None
+            if item_names:
+                # quoted = ", ".join(f'"{v}"' for v in item_names)
+                # expr = f"item_name in [{quoted}]"
+                # 'item_name in ["BrotherHAK-180烫金机","BrotherHAK180烫金机"]'
+                expr = f'item_name in {item_names}'
+                logger.info(f"步骤2: 过滤条件: {expr}")
+            else:
+                logger.info("步骤2: 未指定商品名过滤，将全库检索")
+
+            # 5、构造Milvus混合搜索请求对象
+            reqs = create_hybrid_search_requests(
+                dense_vector=dense_vec,
+                sparse_vector=sparse_vec,
+                expr=expr,
+                limit=10  # 底层检索返回数量（后续会再过滤为5，预留更多结果做重排序）
+            )
+
+            # 6、执行混合向量检索
+            logger.info("步骤2: 开始执行 Milvus 混合检索...")
+            client = get_milvus_client()
+            res = hybrid_search(
+                client=client,
+                collection_name=collection_name,
+                reqs=reqs,
+                ranker_weights=(0.8, 0.2),
+                output_fields=["chunk_id", "content", "item_name"],
+            )
+
+            return res[0] if res else []
+
+        except Exception as e:
+            logger.error(f"步骤2: 检索过程发生异常: {e}")
+            raise e
+
+

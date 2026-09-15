@@ -1,3 +1,5 @@
+import json
+
 from config.milvus_config import milvus_config
 from processor.query_processor.base import NodeBase, T
 from processor.query_processor.state import QueryGraphState
@@ -81,3 +83,11 @@ class NodeSearchEmbedding(NodeBase):
         except Exception as e:
             logger.exception(f"向量搜索失败: {e}")
             return {}
+if __name__ == "__main__":
+    node_Search_embedding = NodeSearchEmbedding()
+    init_state = {
+        "item_names": ["兄弟HAK180烫金机","百度一下"],
+        "rewritten_query": "BrotherHAK-180烫金机，请帮我找一下这个机器的说明书"
+    }
+    process = node_Search_embedding.process(init_state)
+    print(json.dumps(process, ensure_ascii=False, indent=4))
