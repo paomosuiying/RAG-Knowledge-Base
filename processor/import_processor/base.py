@@ -8,9 +8,12 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Optional
 import logging
 
+from processor.import_processor import state
 from processor.import_processor.import_config import ImportConfig
 from processor.import_processor.exceptions import ImportProcessError
 from processor.import_processor.import_config import get_config
+from utils.task_utils import add_running_task, add_done_task
+
 T = TypeVar("T")  # 泛型状态类型
 
 
@@ -33,7 +36,6 @@ class BaseNode(ABC):
         node = MyNode()
         workflow.add_node("my_node", node)
     """
-
     name: str = "base_node"  # 节点名称，子类应覆盖
 
     def __init__(self, config: Optional[ImportConfig] = None):
@@ -43,6 +45,7 @@ class BaseNode(ABC):
         Args:
             config: 配置对象，默认使用全局配置
         """
+
         self.config = config or get_config()
         self.logger = logging.getLogger(f"import.{self.name}")
 

@@ -73,9 +73,12 @@ class NodeMDImg(BaseNode):
             raise FileProcessingError(message=f"MD文件{md_path_obj.name}不存在")
 
         # 4、获取md_content
-        md_content = state["md_content"]
+        # 注意：这里必须用 .get()。node_pdf_to_md 会写入 md_content，但 .md 文件走的是
+        # node_entry → node_md_img，跳过了 node_pdf_to_md，state 里没有这个字段。
+        # 用 state["md_content"] 会直接抛 KeyError，下面的兜底读取永远执行不到。
+        md_content = state.get("md_content")
 
-        #测试用代码
+        # 兜底：state 中没有 md_content 时，直接从磁盘上的 MD 文件读取
         if not md_content:
             with open(md_path, "r", encoding="utf-8") as md_file:
                 md_content = md_file.read()
@@ -96,6 +99,12 @@ class NodeMDImg(BaseNode):
         target_images = []
 
         # 2. 遍历图片文件夹
+        # 注意：PDF 经 MinerU 解析后会生成 images 目录，但直接上传的 .md 没有这个目录，
+        # 此时视为「无图片」直接返回，不能让它抛 FileNotFoundError 中断整个流程。
+        if not images_dir.exists():
+            self.logger.info(f"图片目录不存在，视为无图片：{images_dir}")
+            return target_images
+
         for image_file in os.listdir(images_dir):
 
             # 2.1 过滤无效后缀

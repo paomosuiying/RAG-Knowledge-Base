@@ -1,14 +1,64 @@
+import contextlib
 import json
 import logging
+import os
 import shutil
+import socket
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
+
 import requests
 from config.mineru_config import mineru_config
 from processor.import_processor.base import BaseNode, setup_logging
 from processor.import_processor.exceptions import StateFieldError, FileProcessingError, PdfConversionError
 from processor.import_processor.state import ImportGraphState
+
+
+def _resolve_with_fallback_dns(host: str):
+    """
+    用 .env 中 MINERU_CDN_FALLBACK_DNS 配置的备用 DNS 解析主机名。
+    部分网络（如校园网）的 DNS 解析不了 MinerU 的结果 CDN 域名，这里做兜底。
+    未配置或解析失败时返回 None，由调用方决定是否抛出原始异常。
+    """
+    servers = [s.strip() for s in os.getenv("MINERU_CDN_FALLBACK_DNS", "").split(",") if s.strip()]
+    if not servers:
+        return None
+    try:
+        import dns.resolver
+    except ImportError:
+        logging.warning("未安装 dnspython，无法使用备用 DNS 兜底解析")
+        return None
+
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = servers
+    resolver.lifetime = 5
+    try:
+        return str(resolver.resolve(host, "A")[0])
+    except Exception as e:
+        logging.warning(f"备用 DNS {servers} 解析 {host} 失败：{e}")
+        return None
+
+
+@contextlib.contextmanager
+def _pin_dns(host: str, ip: str):
+    """
+    在请求期间把 host 的解析结果固定为 ip。
+    只替换 socket.getaddrinfo，URL / Host 头 / TLS SNI 全部保持不变，因此证书校验照常生效。
+    """
+    orig_getaddrinfo = socket.getaddrinfo
+
+    def patched(h, port, *args, **kwargs):
+        if h == host:
+            return orig_getaddrinfo(ip, port, *args, **kwargs)
+        return orig_getaddrinfo(h, port, *args, **kwargs)
+
+    socket.getaddrinfo = patched
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = orig_getaddrinfo
 
 
 class NodePDFToMD(BaseNode):
@@ -180,6 +230,27 @@ class NodePDFToMD(BaseNode):
                     f"【任务轮询】处理中... 已耗时{int(elapsed_time)}s，状态：{data_state}， batch_id：{batch_id}")
                 time.sleep(poll_interval)
 
+    def _download_zip(self, zip_url: str) -> requests.Response:
+        """
+        下载 MinerU 结果 ZIP 包。
+
+        先按正常方式请求；若因 DNS 解析失败而连不上，则用 .env 里配置的
+        MINERU_CDN_FALLBACK_DNS 备用 DNS 解析出 IP，再重试一次。
+        重试时仍使用原始 URL，只固定解析结果，因此 Host 头、TLS SNI、证书校验都不受影响。
+        """
+        timeout = (10, 120)  # (连接超时, 读取超时)
+        try:
+            return requests.get(zip_url, timeout=timeout)
+        except requests.exceptions.ConnectionError as e:
+            host = urlparse(zip_url).hostname
+            self.logger.warning(f"【ZIP下载】直连失败，尝试备用 DNS 兜底：{e}")
+            fallback_ip = _resolve_with_fallback_dns(host)
+            if not fallback_ip:
+                raise
+            self.logger.info(f"【ZIP下载】备用 DNS 解析 {host} -> {fallback_ip}，重试下载")
+            with _pin_dns(host, fallback_ip):
+                return requests.get(zip_url, timeout=timeout)
+
     def _step_3_download_and_extract(self, zip_url: str, output_dir_obj: Path, pdf_stem: str) -> str:
         logging.info(f"_step_3_download_and_extract下载zip压缩文件并且解压文件")
         """
@@ -192,7 +263,7 @@ class NodePDFToMD(BaseNode):
 
         # 1、下载ZIP包
         self.logger.info(f"【ZIP下载】开始下载ZIP包：{zip_url} ...")
-        response = requests.get(zip_url)
+        response = self._download_zip(zip_url)
 
         # 对响应结果进行校验
         if response.status_code != 200:

@@ -216,68 +216,57 @@ class NodeDocumentSplit(BaseNode):
         if content_len <= get_config().max_content_length:
             return [section]
 
-            # 提取章节标题，用于组装子Chunk前缀（保留标题上下文）
-            title = section.get("title", "")
-            # 标题前缀：带空行分隔，与正文区分开
-            prefix = f"{title}\n\n" if title else ""
-            # 计算正文可用长度：总长度 - 标题前缀长度（避免标题占满Chunk额度）
-            available_len = self.config.max_content_length - len(prefix)
-            # 极端情况：标题长度超过阈值，无法切分，返回原章节
-            if available_len <= 0:
-                self.logger.warning(f"章节标题过长，无法切分：{title[:20]}...")
-                return [section]
+        # 提取章节标题，用于组装子Chunk前缀（保留标题上下文）
+        title = section.get("title", "")
+        # 标题前缀：带空行分隔，与正文区分开
+        prefix = f"{title}\n\n" if title else ""
+        # 计算正文可用长度：总长度 - 标题前缀长度（避免标题占满Chunk额度）
+        available_len = self.config.max_content_length - len(prefix)
+        # 极端情况：标题长度超过阈值，无法切分，返回原章节
+        if available_len <= 0:
+            self.logger.warning(f"章节标题过长，无法切分：{title[:20]}...")
+            return [section]
 
-            # 提取章节标题，用于组装子Chunk前缀（保留标题上下文）
-            title = section.get("title", "")
-            # 标题前缀：带空行分隔，与正文区分开
-            prefix = f"{title}\n\n" if title else ""
-            # 计算正文可用长度：总长度 - 标题前缀长度（避免标题占满Chunk额度）
-            available_len = self.config.max_content_length - len(prefix)
-            # 极端情况：标题长度超过阈值，无法切分，返回原章节
-            if available_len <= 0:
-                self.logger.warning(f"章节标题过长，无法切分：{title[:20]}...")
-                return [section]
+        # 清理正文重复标题：避免原章节中正文开头重复标题，导致子Chunk内容冗余
+        body = content
+        if title and body.lstrip().startswith(title):
+            body = body[body.find(title) + len(title):].lstrip()
 
-            # 清理正文重复标题：避免原章节中正文开头重复标题，导致子Chunk内容冗余
-            body = content
-            if title and body.lstrip().startswith(title):
-                body = body[body.find(title) + len(title):].lstrip()
+        # 初始化LangChain递归分割器（核心工具：按优先级分隔符切分，保留语义）
+        # separators：分割符优先级（从粗到细），优先按大语义单元切分，最后才硬拆
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=available_len,  # 正文部分最大长度（已扣除标题）
+            chunk_overlap=0,  # 无重叠：按标题切分后语义完整，无需重叠
+            # 分割符优先级：空行(段落)→换行→中文标点→英文标点→空格，最后硬拆（在 chunk_size 位置强制切断）
+            # 先用第一个分隔符进行切分，切分后如果某个 Chunk 还是超过 chunk_size，则继续用下一个优先级的分隔符切分
+            separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";", " "],
+        )
 
-            # 初始化LangChain递归分割器（核心工具：按优先级分隔符切分，保留语义）
-            # separators：分割符优先级（从粗到细），优先按大语义单元切分，最后才硬拆
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=available_len,  # 正文部分最大长度（已扣除标题）
-                chunk_overlap=0,  # 无重叠：按标题切分后语义完整，无需重叠
-                # 分割符优先级：空行(段落)→换行→中文标点→英文标点→空格，最后硬拆（在 chunk_size 位置强制切断）
-                # 先用第一个分隔符进行切分，切分后如果某个 Chunk 还是超过 chunk_size，则继续用下一个优先级的分隔符切分
-                separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";", " "],
-            )
+        # 切分正文并组装子章节（带完整元信息，便于溯源）
+        sub_sections = []
 
-            # 切分正文并组装子章节（带完整元信息，便于溯源）
-            sub_sections = []
+        # 遍历切分后的每个文本块，idx 从 1 开始计数
+        for idx, chunk in enumerate(splitter.split_text(body), start=1):
 
-            # 遍历切分后的每个文本块，idx 从 1 开始计数
-            for idx, chunk in enumerate(splitter.split_text(body), start=1):
+            # 清理空内容：跳过切分后的空字符串
+            text = chunk.strip()
+            if not text:
+                continue
 
-                # 清理空内容：跳过切分后的空字符串
-                text = chunk.strip()
-                if not text:
-                    continue
+            # 组装子Chunk完整内容 = 标题前缀 + 切分后的正文
+            full_text = (prefix + text).strip()
 
-                # 组装子Chunk完整内容 = 标题前缀 + 切分后的正文
-                full_text = (prefix + text).strip()
+            # 子章节元信息：保留父级关联，添加序号，便于后续检索/溯源
+            sub_sections.append({
+                "title": f"{title}-{idx}" if title else f"chunk-{idx}",  # 子Chunk标题（带序号）
+                "content": full_text,  # 切分后的完整内容
+                "parent_title": title,  # 父章节标题（用于后续合并）
+                "part": idx,  # 子Chunk序号
+                "file_title": section.get("file_title"),  # 所属文件标题
+            })
 
-                # 子章节元信息：保留父级关联，添加序号，便于后续检索/溯源
-                sub_sections.append({
-                    "title": f"{title}-{idx}" if title else f"chunk-{idx}",  # 子Chunk标题（带序号）
-                    "content": full_text,  # 切分后的完整内容
-                    "parent_title": title,  # 父章节标题（用于后续合并）
-                    "part": idx,  # 子Chunk序号
-                    "file_title": section.get("file_title"),  # 所属文件标题
-                })
-
-            self.self.logger.debug(f"超长章节切分完成：{title} → 生成{len(sub_sections)}个子Chunk")
-            return sub_sections
+        self.logger.debug(f"超长章节切分完成：{title} → 生成{len(sub_sections)}个子Chunk")
+        return sub_sections
 
     #步骤4的短合方法
     def merge_short_sections(self, sections: List[Dict[str, str]]) -> List[Dict[str, str]]:
