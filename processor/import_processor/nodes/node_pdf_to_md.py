@@ -210,6 +210,7 @@ class NodePDFToMD(BaseNode):
 
             # 获取结果
             result_item = extract_results[0]
+
             data_state = result_item["state"]
 
             # 状态为 done
